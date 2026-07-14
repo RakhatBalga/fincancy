@@ -65,9 +65,10 @@ def _verdict(actual_pct: float, target_pct: float, lower_is_better: bool) -> str
 
 def format_rule(rule: RuleBreakdown, currency: str) -> str:
     """Render the 50/30/20 breakdown."""
+    source = "получено в этом месяце" if rule.income_is_actual else "ожидаемый доход"
     return (
-        "📊 <b>Правило 50/30/20</b> (от дохода "
-        f"{format_amount(rule.income, currency)})\n"
+        "📊 <b>Правило 50/30/20</b> (доход "
+        f"{format_amount(rule.income, currency)}, {source})\n"
         f"Нужное: {format_amount(rule.needs, currency)} "
         f"({rule.needs_pct:.0f}% / цель 50%) — "
         f"{_verdict(rule.needs_pct, 50, lower_is_better=True)}\n"

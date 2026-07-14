@@ -35,6 +35,9 @@ class RuleBreakdown:
     needs_pct: float
     wants_pct: float
     savings_pct: float
+    # True if `income` is the sum of income actually logged this month;
+    # False if it fell back to the declared /income baseline.
+    income_is_actual: bool
 
 
 _ADVICE_SYSTEM = """
@@ -70,12 +73,24 @@ class AdvisorService:
     async def fifty_thirty_twenty(self, user: User) -> RuleBreakdown | None:
         """Evaluate the 50/30/20 rule for this month.
 
-        Returns ``None`` if the user has not set a monthly income yet.
+        Income is taken from the actual income transactions logged this month;
+        if none yet, it falls back to the declared ``/income`` baseline. So the
+        rule updates itself as salary/stipend land — no monthly re-entry needed.
+        Returns ``None`` if there is neither logged income nor a baseline.
         """
-        if not user.monthly_income or float(user.monthly_income) <= 0:
+        start, end = periods.month_range()
+        actual_income = await self._transactions.total_amount(
+            user.id, TransactionType.income, start, end
+        )
+        baseline = float(user.monthly_income or 0.0)
+
+        # Use the larger of the two: a small logged gift shouldn't override the
+        # expected salary, but real income above the baseline should win.
+        income = max(actual_income, baseline)
+        income_is_actual = actual_income > 0 and actual_income >= baseline
+        if income <= 0:
             return None
 
-        income = float(user.monthly_income)
         groups = await self._analytics.group_totals(user)
         needs = groups.get("needs", 0.0)
         wants = groups.get("wants", 0.0)
@@ -89,6 +104,7 @@ class AdvisorService:
             needs_pct=needs / income * 100.0,
             wants_pct=wants / income * 100.0,
             savings_pct=savings / income * 100.0,
+            income_is_actual=income_is_actual,
         )
 
     async def monthly_advice(self, user: User) -> str:

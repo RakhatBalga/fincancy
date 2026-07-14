@@ -40,8 +40,9 @@ async def cmd_rule(message: Message, session: AsyncSession) -> None:
     rule = await AdvisorService(session).fifty_thirty_twenty(user)
     if rule is None:
         await message.answer(
-            "Сначала укажи доход: <code>/income 400000</code> — "
-            "тогда посчитаю правило 50/30/20."
+            "Нужен доход. Просто запиши поступление, например "
+            "<i>зарплата 150000</i> или <i>стипендия 40000</i> — правило "
+            "пересчитается само. Либо задай ожидаемый: <code>/income 190000</code>."
         )
         return
     await message.answer(format_rule(rule, user.currency))
