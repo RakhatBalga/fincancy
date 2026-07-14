@@ -26,6 +26,9 @@ CATEGORY_GROUPS: dict[str, str | None] = {
     "детям": "needs",
     "подарки": "wants",
     "путешествия": "wants",
+    # Contractual/family obligations count as needs, not discretionary wants.
+    "кредиты и рассрочка": "needs",
+    "помощь семье": "needs",
     "переводы": "wants",
     "прочее": "wants",
     "зарплата": None,
