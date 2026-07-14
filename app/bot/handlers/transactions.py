@@ -16,12 +16,21 @@ from app.bot.keyboards import (
     confirm_keyboard,
 )
 from app.repositories.category_repo import CategoryRepository
+from app.repositories.transaction_repo import TransactionRepository
 from app.services.parser_service import ExpenseParseError, ParserService
 from app.services.transaction_service import TransactionService
 from app.services.user_service import UserService
 
 router = Router(name="transactions")
 log = structlog.get_logger(__name__)
+
+# Free-text phrases that mean "delete my last entry" rather than a new one.
+_UNDO_WORDS = ("удали", "отмени", "убери", "отмена", "delete", "undo")
+
+
+def _is_undo(text: str) -> bool:
+    low = text.lower()
+    return any(word in low for word in _UNDO_WORDS)
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -34,6 +43,16 @@ async def handle_free_text(
     user = await UserService(session).get(message.from_user.id)
     if user is None:
         await message.answer("Сначала выполни /start.")
+        return
+
+    # Natural-language "undo": delete the most recent transaction.
+    if _is_undo(message.text):
+        recent = await TransactionRepository(session).list_recent(user.id, 1)
+        if not recent:
+            await message.answer("Нечего удалять — операций пока нет.")
+            return
+        await TransactionService(session).delete(user.id, recent[0].id)
+        await message.answer("🗑 Последняя операция удалена.")
         return
 
     try:

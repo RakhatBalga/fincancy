@@ -44,16 +44,20 @@ TXEDIT_PREFIX = "txedit"
 
 
 def confirm_keyboard(transaction_id: int) -> InlineKeyboardMarkup:
-    """Confirm / change-category keyboard shown after a parsed transaction."""
+    """Confirm / change-category / delete keyboard after a parsed transaction."""
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(
-            text="✅ Подтвердить",
+            text="✅ Ок",
             callback_data=f"{CONFIRM_PREFIX}:{transaction_id}",
         ),
         InlineKeyboardButton(
-            text="✏️ Изменить категорию",
+            text="✏️ Категория",
             callback_data=f"{RECAT_PREFIX}:{transaction_id}",
+        ),
+        InlineKeyboardButton(
+            text="🗑 Удалить",
+            callback_data=f"{TXDEL_PREFIX}:{transaction_id}",
         ),
     )
     return builder.as_markup()
