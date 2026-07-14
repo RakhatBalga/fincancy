@@ -86,7 +86,7 @@ async def on_edit_start(
         await callback.message.answer("Введи новую сумму числом (например 1200):")
 
 
-@router.message(StateFilter(EditAmount.waiting), F.text)
+@router.message(StateFilter(EditAmount.waiting), F.text, ~F.text.startswith("/"))
 async def on_edit_amount(
     message: Message, state: FSMContext, session: AsyncSession
 ) -> None:
