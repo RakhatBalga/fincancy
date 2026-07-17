@@ -42,6 +42,7 @@ _BOT_COMMANDS = [
     BotCommand(command="advice", description="AI-разбор месяца"),
     BotCommand(command="benchmark", description="Сравнение со средним по РК"),
     BotCommand(command="subscriptions", description="Найти подписки"),
+    BotCommand(command="reset", description="Удалить все траты и бюджеты"),
 ]
 
 

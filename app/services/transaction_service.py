@@ -6,6 +6,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Transaction, TransactionType
+from app.repositories.budget_repo import BudgetRepository
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.transaction_repo import TransactionRepository
 from app.services.schemas import ParsedTransaction
@@ -20,6 +21,7 @@ class TransactionService:
         self._session = session
         self._transactions = TransactionRepository(session)
         self._categories = CategoryRepository(session)
+        self._budgets = BudgetRepository(session)
 
     async def add_from_parsed(
         self, user_id: int, parsed: ParsedTransaction
@@ -129,3 +131,21 @@ class TransactionService:
             transaction_id=transaction_id,
         )
         return True
+
+    async def reset_all(self, user_id: int) -> tuple[int, int]:
+        """Delete ALL transactions and budgets for this user only.
+
+        Keeps the user profile, income, onboarding answers, and categories
+        intact — only the financial history is wiped. Returns
+        ``(transactions_deleted, budgets_deleted)``.
+        """
+        tx_count = await self._transactions.delete_all_for_user(user_id)
+        budget_count = await self._budgets.delete_all_for_user(user_id)
+        await self._session.commit()
+        log.info(
+            "user_data_reset",
+            user_id=user_id,
+            transactions_deleted=tx_count,
+            budgets_deleted=budget_count,
+        )
+        return tx_count, budget_count

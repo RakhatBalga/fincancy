@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,3 +40,10 @@ class BudgetRepository:
             select(Budget).where(Budget.user_id == user_id, Budget.month == month)
         )
         return list(result.scalars().all())
+
+    async def delete_all_for_user(self, user_id: int) -> int:
+        """Delete every budget belonging to ``user_id``. Returns count deleted."""
+        result = await self._session.execute(
+            delete(Budget).where(Budget.user_id == user_id)
+        )
+        return result.rowcount or 0

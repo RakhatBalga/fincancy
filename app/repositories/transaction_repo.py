@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Category, Transaction, TransactionType
@@ -136,6 +136,13 @@ class TransactionRepository:
         )
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_all_for_user(self, user_id: int) -> int:
+        """Delete every transaction belonging to ``user_id``. Returns count deleted."""
+        result = await self._session.execute(
+            delete(Transaction).where(Transaction.user_id == user_id)
+        )
+        return result.rowcount or 0
 
     async def list_since(
         self,

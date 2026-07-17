@@ -44,6 +44,23 @@ def housing_question_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+RESET_PREFIX = "reset"
+
+
+def reset_confirm_keyboard() -> InlineKeyboardMarkup:
+    """Are-you-sure keyboard before wiping all of the user's data."""
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="🗑 Да, удалить всё", callback_data=f"{RESET_PREFIX}:confirm"
+        ),
+        InlineKeyboardButton(
+            text="Отмена", callback_data=f"{RESET_PREFIX}:cancel"
+        ),
+    )
+    return builder.as_markup()
+
+
 def food_question_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(

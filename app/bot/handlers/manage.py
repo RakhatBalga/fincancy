@@ -16,8 +16,10 @@ from app.bot.formatters import (
 )
 from app.bot.keyboards import (
     MENU_BUTTONS,
+    RESET_PREFIX,
     TXDEL_PREFIX,
     TXEDIT_PREFIX,
+    reset_confirm_keyboard,
     transaction_row_keyboard,
 )
 from app.repositories.transaction_repo import TransactionRepository
@@ -126,3 +128,43 @@ async def on_edit_amount(
     await message.answer(
         f"✅ Сумма обновлена: {format_amount(amount, user.currency)}"
     )
+
+
+@router.message(Command("reset"))
+async def cmd_reset(message: Message, session: AsyncSession) -> None:
+    assert message.from_user is not None
+    user = await UserService(session).get(message.from_user.id)
+    if user is None:
+        await message.answer("Сначала выполни /start.")
+        return
+
+    await message.answer(
+        "⚠️ <b>Удалить ВСЕ траты, доходы и бюджеты?</b>\n"
+        "Это действие необратимо. Профиль, категории и доход останутся.",
+        reply_markup=reset_confirm_keyboard(),
+    )
+
+
+@router.callback_query(F.data == f"{RESET_PREFIX}:cancel")
+async def on_reset_cancel(callback: CallbackQuery) -> None:
+    await callback.answer("Отменено")
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text("Отменено — данные не тронуты.")
+
+
+@router.callback_query(F.data == f"{RESET_PREFIX}:confirm")
+async def on_reset_confirm(callback: CallbackQuery, session: AsyncSession) -> None:
+    assert callback.from_user is not None
+    user = await UserService(session).get(callback.from_user.id)
+    if user is None:
+        await callback.answer("Сначала выполни /start.", show_alert=True)
+        return
+
+    tx_count, budget_count = await TransactionService(session).reset_all(user.id)
+
+    await callback.answer("Удалено")
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            f"🗑 Удалено: {tx_count} операций, {budget_count} бюджетов.\n"
+            "Можно начинать заново — просто пиши траты обычным текстом."
+        )
