@@ -8,8 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Category
 
 # Full category taxonomy (matches the Gemini parser prompt) → 50/30/20 bucket.
-# "needs" = essentials, "wants" = discretionary. Income categories map to None
-# (they are excluded from the needs/wants math, which counts expenses only).
+# "needs" = essentials, "wants" = discretionary, "savings" = money set aside
+# (excluded from BOTH needs and wants so it doesn't distort either share).
+# Income categories map to None (excluded from the needs/wants/savings math,
+# which counts expenses only).
 CATEGORY_GROUPS: dict[str, str | None] = {
     "продукты": "needs",
     "еда вне дома": "wants",
@@ -31,9 +33,25 @@ CATEGORY_GROUPS: dict[str, str | None] = {
     "помощь семье": "needs",
     "переводы": "wants",
     "прочее": "wants",
+    # Money moved into savings/investments — not a "want", shouldn't inflate it.
+    "депозит": "savings",
+    "накопления": "savings",
+    "сбережения": "savings",
+    "вклад": "savings",
+    "инвестиции": "savings",
     "зарплата": None,
     "доход прочее": None,
 }
+
+# Substring keywords for auto-created categories not in the taxonomy above
+# (e.g. user types "мой депозит" or "накопления на авто").
+_SAVINGS_KEYWORDS: tuple[str, ...] = (
+    "депозит",
+    "накоплени",
+    "сбережен",
+    "вклад",
+    "инвестици",
+)
 
 # Categories pre-created on /start. A curated core subset — the rest are
 # created on demand when the parser first returns them.
@@ -56,6 +74,8 @@ def group_for(name: str) -> str | None:
     key = name.strip().casefold()
     if key in CATEGORY_GROUPS:
         return CATEGORY_GROUPS[key]
+    if any(kw in key for kw in _SAVINGS_KEYWORDS):
+        return "savings"
     return "wants"
 
 
