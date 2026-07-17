@@ -26,9 +26,17 @@ log = structlog.get_logger(__name__)
 T = TypeVar("T", bound=BaseModel)
 
 # Tried in order after the configured model, if that one keeps failing.
-_FALLBACK_MODELS: tuple[str, ...] = ("gemini-2.0-flash",)
-_MAX_ATTEMPTS_PER_MODEL = 2
-_BASE_BACKOFF = 1.0  # seconds; grows linearly per attempt
+# All lightweight flash variants — unlikely to all be overloaded at once.
+_FALLBACK_MODELS: tuple[str, ...] = (
+    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash-lite",
+    "gemini-flash-latest",
+)
+# One try per model so a 503 cascades quickly through the list instead of
+# making the user wait on repeated backoffs.
+_MAX_ATTEMPTS_PER_MODEL = 1
+_BASE_BACKOFF = 0.8  # seconds between attempts
 
 
 @lru_cache(maxsize=1)
