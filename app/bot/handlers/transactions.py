@@ -27,10 +27,19 @@ log = structlog.get_logger(__name__)
 # Free-text phrases that mean "delete my last entry" rather than a new one.
 _UNDO_WORDS = ("удали", "отмени", "убери", "отмена", "delete", "undo")
 
+# Phrases meaning "edit/reclassify an existing entry" — must NOT be parsed as
+# a brand-new transaction (that would silently duplicate the amount).
+_EDIT_WORDS = ("смени", "поменяй", "измени", "исправь", "переклассифи")
+
 
 def _is_undo(text: str) -> bool:
     low = text.lower()
     return any(word in low for word in _UNDO_WORDS)
+
+
+def _is_edit_command(text: str) -> bool:
+    low = text.lower()
+    return any(word in low for word in _EDIT_WORDS)
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -53,6 +62,17 @@ async def handle_free_text(
             return
         await TransactionService(session).delete(user.id, recent[0].id)
         await message.answer("🗑 Последняя операция удалена.")
+        return
+
+    # "смени/поменяй/исправь X" — user wants to edit an existing entry, not
+    # log a new one. Parsing this as a transaction would silently duplicate
+    # the amount, so redirect to the actual editing flow instead.
+    if _is_edit_command(message.text):
+        await message.answer(
+            "Изменить существующую операцию текстом нельзя — открой /recent, "
+            "найди нужную запись и используй кнопки ✏️/🗑 под ней "
+            "(для смены категории — кнопку «Категория» под свежим подтверждением)."
+        )
         return
 
     try:
