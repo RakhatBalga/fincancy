@@ -18,7 +18,7 @@ from app.bot.formatters import (
     format_benchmark,
     format_rule,
 )
-from app.bot.keyboards import BTN_AI
+from app.bot.keyboards import AI_BUTTONS
 from app.db.models import User
 from app.services.advisor_service import AdvisorService
 from app.services.analytics_service import AnalyticsService
@@ -66,7 +66,7 @@ async def cmd_benchmark(message: Message, session: AsyncSession) -> None:
 
 
 @router.message(Command("advice"))
-@router.message(F.text == BTN_AI)
+@router.message(F.text.in_(AI_BUTTONS))
 async def cmd_advice(message: Message, session: AsyncSession) -> None:
     user = await _require_user(message, session)
     if user is None:

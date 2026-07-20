@@ -8,7 +8,7 @@ from aiogram.types import BufferedInputFile, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.charts import pie_chart
-from app.bot.keyboards import BTN_CHART
+from app.bot.keyboards import CHART_BUTTONS
 from app.services.analytics_service import AnalyticsService
 from app.services.user_service import UserService
 
@@ -16,7 +16,7 @@ router = Router(name="chart")
 
 
 @router.message(Command("chart"))
-@router.message(F.text == BTN_CHART)
+@router.message(F.text.in_(CHART_BUTTONS))
 async def cmd_chart(message: Message, session: AsyncSession) -> None:
     assert message.from_user is not None
     user = await UserService(session).get(message.from_user.id)

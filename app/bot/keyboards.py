@@ -17,10 +17,26 @@ BTN_MONTH = "📊 Ай"
 BTN_INCOME = "💰 Кірістер"
 BTN_CHART = "📈 Диаграмма"
 
+# Legacy Russian labels: Telegram caches the reply keyboard per chat, so users
+# who haven't re-run /start since the Kazakh switch still send the old text.
+# Handlers accept both, otherwise those taps fall through to the free-text
+# parser and get treated as an expense.
+_LEGACY_AI = "🧠 Мнение ИИ"
+_LEGACY_TODAY = "📅 Сегодня"
+_LEGACY_MONTH = "📊 Месяц"
+_LEGACY_INCOME = "💰 Доходы"
+_LEGACY_CHART = "📈 График"
+
+AI_BUTTONS: frozenset[str] = frozenset({BTN_AI, _LEGACY_AI})
+TODAY_BUTTONS: frozenset[str] = frozenset({BTN_TODAY, _LEGACY_TODAY})
+MONTH_BUTTONS: frozenset[str] = frozenset({BTN_MONTH, _LEGACY_MONTH})
+INCOME_BUTTONS: frozenset[str] = frozenset({BTN_INCOME, _LEGACY_INCOME})
+CHART_BUTTONS: frozenset[str] = frozenset({BTN_CHART, _LEGACY_CHART})
+
 # All reply-keyboard labels — FSM "waiting for a number" states exclude these so
 # a button press is never mistaken for the typed amount.
-MENU_BUTTONS: frozenset[str] = frozenset(
-    {BTN_AI, BTN_TODAY, BTN_MONTH, BTN_INCOME, BTN_CHART}
+MENU_BUTTONS: frozenset[str] = (
+    AI_BUTTONS | TODAY_BUTTONS | MONTH_BUTTONS | INCOME_BUTTONS | CHART_BUTTONS
 )
 
 # Onboarding: housing/food cost questions asked once on first /start.
