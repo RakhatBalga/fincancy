@@ -8,6 +8,7 @@ from app.bot.formatters import (
 )
 from app.bot.handlers.assets import _goal_input
 from app.db.models import BrokerAccount, Deposit, FinancialGoal, InvestmentPosition
+from app.services.advisor_service import build_asset_advice_summary
 from app.services.asset_service import PositionValue, WealthSummary
 
 
@@ -112,3 +113,34 @@ def test_portfolio_combines_realized_and_unrealized_pnl() -> None:
     text = format_portfolio_header(summary)
 
     assert "Общий P/L: <b>+$140.00</b> · <b>+70 000 ₸</b>" in text
+
+
+def test_ai_asset_summary_contains_portfolio_deposits_goal_and_capital() -> None:
+    position = InvestmentPosition(
+        id=1,
+        user_id=1,
+        symbol="AAPL",
+        quantity=2,
+        average_price_usd=100,
+    )
+    value = PositionValue(position, 120, 200, 240)
+    deposit = Deposit(id=1, user_id=1, name="Депозит", balance=500_000, currency="KZT")
+    account = BrokerAccount(
+        user_id=1, cash_usd=10, realized_pnl_usd=100, transaction_count=1
+    )
+    goal = FinancialGoal(
+        id=1,
+        user_id=1,
+        title="Квартира",
+        target_amount=10_000_000,
+        current_amount=0,
+        currency="KZT",
+    )
+    summary = WealthSummary([value], [deposit], 500, account)
+
+    text = build_asset_advice_summary(summary, [goal])
+
+    assert "Общий капитал: 625000 KZT / 1250.00 USD" in text
+    assert "депозиты: 500000 KZT" in text
+    assert "общий +140.00 USD" in text
+    assert "Цель Квартира: 6.2% выполнено" in text

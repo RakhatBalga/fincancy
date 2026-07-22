@@ -12,11 +12,12 @@ from dataclasses import dataclass
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import TransactionType, User
+from app.db.models import FinancialGoal, TransactionType, User
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.transaction_repo import TransactionRepository
 from app.services import benchmarks, gemini, periods
 from app.services.analytics_service import AnalyticsService
+from app.services.asset_service import WealthSummary
 
 log = structlog.get_logger(__name__)
 
@@ -103,6 +104,33 @@ _ADVICE_SYSTEM = """
   реалистичные шаги, включая дополнительный доход. Без чувства вины и морализаторства.
 """.strip()
 
+_COMPACT_ADVICE_SYSTEM = """
+Ты — спокойный и честный финансовый советник. Пользователь из Казахстана.
+На входе будут расходы и доходы за месяц, депозиты, инвестиционный портфель,
+реализованный и нереализованный P/L, общий капитал и финансовые цели.
+
+Ответь ПО-РУССКИ, коротко и конкретно, только в таком формате:
+
+<b>Коротко</b>
+Два предложения с общей оценкой финансового положения.
+
+<b>Что вижу</b>
+Ровно 3 коротких пункта, каждый начинается с "• ". Обязательно оцени:
+• соотношение депозитов и риск портфеля;
+• результат инвестиций, включая реализованный и нереализованный P/L;
+• близость к финансовой цели и достаточность текущего темпа.
+
+<b>Следующий шаг</b>
+Одно конкретное действие без длинного плана.
+
+Правила:
+- Весь ответ не длиннее 900 символов.
+- Не повторяй все цифры из сводки; используй только ключевые.
+- Не обещай доходность и не выдумывай данные.
+- Не давай категоричных команд покупать или продавать конкретную акцию.
+- Используй только Telegram HTML <b>, без markdown.
+""".strip()
+
 
 # Telegram's HTML parser only understands a small tag set (b, i, u, s, a,
 # code, pre, span, blockquote) — anything else (p, ul, li, div, br, h1, ...)
@@ -129,6 +157,42 @@ def _clean_markup(text: str) -> str:
     # Collapse runs of blank lines left behind by the tag stripping.
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def build_asset_advice_summary(
+    summary: WealthSummary, goals: list[FinancialGoal]
+) -> str:
+    """Build compact, factual asset context for the AI review."""
+    lines = [
+        "Активы:",
+        f"- Общий капитал: {summary.total_kzt:.0f} KZT / {summary.total_usd:.2f} USD.",
+        f"- Брокерский счёт: {summary.broker_total_usd:.2f} USD; "
+        f"депозиты: {summary.deposits_kzt:.0f} KZT.",
+    ]
+    unrealized = sum(item.profit_usd for item in summary.positions)
+    realized = (
+        float(summary.broker_account.realized_pnl_usd) if summary.broker_account else 0
+    )
+    lines.append(
+        f"- P/L: нереализованный {unrealized:+.2f} USD, "
+        f"закрытые сделки {realized:+.2f} USD, общий {unrealized + realized:+.2f} USD."
+    )
+    if summary.positions:
+        positions = ", ".join(
+            f"{item.position.symbol} {item.value_usd:.2f} USD "
+            f"({item.profit_percent:+.1f}%)"
+            for item in summary.positions
+        )
+        lines.append(f"- Позиции: {positions}.")
+    for goal in goals:
+        current = summary.total_usd if goal.currency == "USD" else summary.total_kzt
+        target = float(goal.target_amount)
+        progress = current / target * 100 if target else 0
+        lines.append(
+            f"- Цель {goal.title}: {progress:.1f}% выполнено, "
+            f"осталось {max(0, 100 - progress):.1f}%."
+        )
+    return "\n".join(lines)
 
 
 class AdvisorService:
@@ -192,25 +256,27 @@ class AdvisorService:
             savings_ideal=savings_ideal,
         )
 
-    async def monthly_advice(self, user: User) -> str:
-        """Generate a detailed month review from this month's data (AI)."""
-        summary = await self._build_summary(user)
+    async def monthly_advice(self, user: User, asset_summary: str | None = None) -> str:
+        """Generate a compact review of cash flow, assets, and goals."""
+        summary = await self._build_summary(user, asset_summary)
         if summary is None:
             return "Ай бойы дерек аз — бірнеше шығын жаз, сонда кеңес беремін."
 
-        advice = await gemini.generate_text(summary, _ADVICE_SYSTEM)
+        advice = await gemini.generate_text(summary, _COMPACT_ADVICE_SYSTEM)
         log.info("monthly_advice_generated", user_id=user.id)
         if not advice:
             return "Кеңес құрастыра алмадым, кейінірек көр."
         return _clean_markup(advice)
 
-    async def _build_summary(self, user: User) -> str | None:
+    async def _build_summary(
+        self, user: User, asset_summary: str | None = None
+    ) -> str | None:
         """Assemble a compact plain-text summary fed to the model."""
         start, end = periods.month_range()
         rows = await self._transactions.total_by_category(
             user.id, TransactionType.expense, start, end
         )
-        if not rows:
+        if not rows and not asset_summary:
             return None
 
         total = sum(a for _, a in rows)
@@ -301,6 +367,9 @@ class AdvisorService:
         ][:3]
         if deviations:
             lines.append("Отклонения от среднего по РК: " + "; ".join(deviations) + ".")
+
+        if asset_summary:
+            lines.extend(["", asset_summary])
 
         return "\n".join(lines)
 

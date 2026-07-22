@@ -14,14 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.formatters import (
     format_advice,
-    format_anomalies,
     format_benchmark,
     format_rule,
 )
 from app.bot.keyboards import AI_BUTTONS
 from app.db.models import User
-from app.services.advisor_service import AdvisorService
+from app.services.advisor_service import AdvisorService, build_asset_advice_summary
 from app.services.analytics_service import AnalyticsService
+from app.services.asset_service import AssetService
+from app.services.market_data import MarketDataError, YahooFinanceService
 from app.services.user_service import UserService
 
 router = Router(name="advice")
@@ -67,7 +68,11 @@ async def cmd_benchmark(message: Message, session: AsyncSession) -> None:
 
 @router.message(Command("advice"))
 @router.message(F.text.in_(AI_BUTTONS))
-async def cmd_advice(message: Message, session: AsyncSession) -> None:
+async def cmd_advice(
+    message: Message,
+    session: AsyncSession,
+    market: YahooFinanceService,
+) -> None:
     user = await _require_user(message, session)
     if user is None:
         return
@@ -76,31 +81,22 @@ async def cmd_advice(message: Message, session: AsyncSession) -> None:
         await message.bot.send_chat_action(message.chat.id, "typing")
 
     advisor = AdvisorService(session)
-    analytics = AnalyticsService(session)
+    asset_context = None
+    try:
+        asset_service = AssetService(session, market)
+        wealth = await asset_service.wealth(user.id)
+        goals = await asset_service.goals(user.id)
+        asset_context = build_asset_advice_summary(wealth, goals)
+    except MarketDataError:
+        log.warning("asset_quotes_unavailable_for_advice", user_id=user.id)
 
-    parts: list[str] = []
-
-    rule = await advisor.fifty_thirty_twenty(user)
-    if rule is not None:
-        parts.append(format_rule(rule, user.currency))
-
-    anomalies = await analytics.detect_anomalies(user)
-    if anomalies:
-        parts.append(format_anomalies(anomalies, user.currency))
-
-    advice = await advisor.monthly_advice(user)
-    parts.append(format_advice(advice))
-
-    if rule is None:
-        parts.append(
-            "💡 Кірісті <code>/income 400000</code> командасымен көрсет — "
-            "50/30/20 ережесі бойынша талдау қосамын."
-        )
-
-    # Send each block as its own message so a long AI review can't push the
-    # whole thing past Telegram's 4096-char limit.
-    for part in parts:
-        await _safe_send(message, part)
+    try:
+        advice = await advisor.monthly_advice(user, asset_context)
+    except Exception:  # noqa: BLE001 - keep the bot responsive on AI failures
+        log.exception("compact_advice_failed", user_id=user.id)
+        await message.answer("Не удалось получить мнение ИИ. Попробуйте чуть позже.")
+        return
+    await _safe_send(message, format_advice(advice))
 
 
 def _plain(text: str) -> str:
