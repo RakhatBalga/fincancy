@@ -8,6 +8,7 @@ from app.db.models import Deposit, FinancialGoal, Transaction
 from app.services.advisor_service import RuleBreakdown
 from app.services.asset_service import PositionValue, SaleResult, WealthSummary
 from app.services.budget_service import BudgetAlert
+from app.services.market_data import AnalystForecast
 from app.services.schemas import ParsedTransaction, PeriodReport
 
 
@@ -99,7 +100,82 @@ def format_position(item: PositionValue, usd_kzt: float) -> str:
     return "\n".join(lines)
 
 
-def format_portfolio(summary: WealthSummary) -> str:
+def format_portfolio_forecast(
+    summary: WealthSummary,
+    forecasts: dict[str, AnalystForecast],
+    year: int,
+) -> str:
+    if not forecasts:
+        return ""
+
+    lines = ["🔭 <b>Прогнозы аналитиков</b>"]
+    low_value = summary.broker_cash_usd
+    mean_value = summary.broker_cash_usd
+    high_value = summary.broker_cash_usd
+
+    for item in summary.positions:
+        quantity = float(item.position.quantity)
+        forecast = forecasts.get(item.position.symbol)
+        current_value = item.value_usd
+        if forecast is None:
+            low_value += current_value
+            mean_value += current_value
+            high_value += current_value
+            continue
+
+        low_value += quantity * forecast.target_low
+        mean_value += quantity * forecast.target_mean
+        high_value += quantity * forecast.target_high
+        current_price = item.current_price_usd
+        upside = (
+            (forecast.target_mean / current_price - 1) * 100
+            if current_price
+            else 0
+        )
+        analyst_text = (
+            f" · аналитиков: {forecast.analyst_count}"
+            if forecast.analyst_count
+            else ""
+        )
+        lines.append(
+            f"<b>{escape(forecast.symbol)}</b>: средняя цель "
+            f"{format_usd(forecast.target_mean)} ({upside:+.1f}%)\n"
+            f"Диапазон: {format_usd(forecast.target_low)}–"
+            f"{format_usd(forecast.target_high)}{analyst_text}"
+        )
+        if forecast.institution_targets:
+            institutions = "; ".join(
+                f"{escape(target.firm)} {format_usd(target.target_price)}"
+                + (f" ({escape(target.rating)})" if target.rating else "")
+                for target in forecast.institution_targets
+            )
+            lines.append(f"Последние оценки: {institutions}")
+
+    current = summary.broker_total_usd
+    mean_change = (mean_value / current - 1) * 100 if current else 0
+    lines.extend(
+        [
+            "",
+            f"📅 <b>Возможная стоимость к концу {year}</b>",
+            f"Нижний сценарий: {format_usd(low_value)} · "
+            f"{format_kzt(low_value * summary.usd_kzt)}",
+            f"Средний сценарий: <b>{format_usd(mean_value)}</b> · "
+            f"<b>{format_kzt(mean_value * summary.usd_kzt)}</b> "
+            f"({mean_change:+.1f}%)",
+            f"Верхний сценарий: {format_usd(high_value)} · "
+            f"{format_kzt(high_value * summary.usd_kzt)}",
+            "<i>Основано на текущих 12-месячных целях Yahoo Finance; "
+            "кэш учтён без изменения. Это ориентир, не гарантия.</i>",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_portfolio(
+    summary: WealthSummary,
+    forecasts: dict[str, AnalystForecast] | None = None,
+    forecast_year: int | None = None,
+) -> str:
     """Render the entire portfolio as one compact Telegram message."""
     parts = [format_portfolio_header(summary)]
     if summary.positions:
@@ -107,6 +183,8 @@ def format_portfolio(summary: WealthSummary) -> str:
         parts.extend(
             format_position(item, summary.usd_kzt) for item in summary.positions
         )
+    if forecasts and forecast_year:
+        parts.append(format_portfolio_forecast(summary, forecasts, forecast_year))
     return "\n\n".join(parts)
 
 

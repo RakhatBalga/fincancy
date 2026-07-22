@@ -4,12 +4,14 @@ from app.bot.formatters import (
     format_deposits,
     format_goal,
     format_goals,
+    format_portfolio,
     format_portfolio_header,
 )
 from app.bot.handlers.assets import _goal_input
 from app.db.models import BrokerAccount, Deposit, FinancialGoal, InvestmentPosition
 from app.services.advisor_service import build_asset_advice_summary
 from app.services.asset_service import PositionValue, WealthSummary
+from app.services.market_data import AnalystForecast, InstitutionTarget
 
 
 def test_simple_goal_input_defaults_to_zero_kzt() -> None:
@@ -113,6 +115,44 @@ def test_portfolio_combines_realized_and_unrealized_pnl() -> None:
     text = format_portfolio_header(summary)
 
     assert "Общий P/L: <b>+$140.00</b> · <b>+70 000 ₸</b>" in text
+
+
+def test_portfolio_shows_analyst_targets_and_year_end_scenarios() -> None:
+    position = InvestmentPosition(
+        id=1,
+        user_id=1,
+        symbol="AAPL",
+        quantity=2,
+        average_price_usd=100,
+    )
+    summary = WealthSummary(
+        [PositionValue(position, 120, 200, 240)],
+        [],
+        500,
+        BrokerAccount(
+            user_id=1,
+            cash_usd=10,
+            realized_pnl_usd=0,
+            transaction_count=0,
+        ),
+    )
+    forecast = AnalystForecast(
+        symbol="AAPL",
+        target_low=100,
+        target_mean=150,
+        target_high=200,
+        analyst_count=40,
+        recommendation="buy",
+        institution_targets=(InstitutionTarget("Goldman Sachs", 160, "Buy"),),
+    )
+
+    text = format_portfolio(summary, {"AAPL": forecast}, 2026)
+
+    assert "средняя цель $150.00 (+25.0%)" in text
+    assert "Goldman Sachs $160.00 (Buy)" in text
+    assert "Нижний сценарий: $210.00" in text
+    assert "Средний сценарий: <b>$310.00</b>" in text
+    assert "Верхний сценарий: $410.00" in text
 
 
 def test_ai_asset_summary_contains_portfolio_deposits_goal_and_capital() -> None:
