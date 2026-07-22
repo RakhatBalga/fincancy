@@ -252,16 +252,23 @@ def deposit_actions_keyboard(
     return builder.as_markup()
 
 
-def goal_actions_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="➕ Добавить цель", callback_data=ASSET_ADD_GOAL
-                )
-            ]
-        ]
+def goal_actions_keyboard(
+    goals: list[tuple[int, str]] | None = None,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить цель", callback_data=ASSET_ADD_GOAL)
     )
+    delete_buttons = [
+        InlineKeyboardButton(
+            text=f"🗑 {title[:18]}",
+            callback_data=f"{ASSET_DELETE_PREFIX}:goal:{goal_id}",
+        )
+        for goal_id, title in goals or []
+    ]
+    for index in range(0, len(delete_buttons), 2):
+        builder.row(*delete_buttons[index : index + 2])
+    return builder.as_markup()
 
 
 def asset_delete_keyboard(kind: str, item_id: int) -> InlineKeyboardMarkup:

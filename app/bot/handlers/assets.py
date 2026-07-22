@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bot.formatters import (
     format_capital,
     format_deposits,
-    format_goal,
+    format_goals,
     format_portfolio,
     format_sale,
 )
@@ -33,7 +33,6 @@ from app.bot.keyboards import (
     PORTFOLIO_BUTTONS,
     deposit_actions_keyboard,
     goal_actions_keyboard,
-    goal_item_keyboard,
     portfolio_actions_keyboard,
 )
 from app.services.asset_service import AssetService
@@ -160,23 +159,28 @@ async def show_deposits(
 @router.message(Command("fingoals"))
 @router.message(F.text.in_(FIN_GOAL_BUTTONS))
 async def show_goals(
-    message: Message, state: FSMContext, session: AsyncSession
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+    market: YahooFinanceService,
 ) -> None:
     await state.clear()
     user = await _user(message, session)
     if user is None:
         return
-    items = await AssetService(session).goals(user.id)
-    await message.answer(
-        "🎯 <b>Финансовые цели</b>\nПока нет целей."
-        if not items
-        else "🎯 <b>Финансовые цели</b>",
-        reply_markup=goal_actions_keyboard(),
-    )
-    for item in items:
+    service = AssetService(session, market)
+    items = await service.goals(user.id)
+    try:
+        summary = await service.wealth(user.id)
+    except MarketDataError:
         await message.answer(
-            format_goal(item), reply_markup=goal_item_keyboard(item.id)
+            "Не удалось получить котировки для расчёта общего капитала."
         )
+        return
+    await message.answer(
+        format_goals(items, summary),
+        reply_markup=goal_actions_keyboard([(item.id, item.title) for item in items]),
+    )
 
 
 @router.message(Command("capital"))

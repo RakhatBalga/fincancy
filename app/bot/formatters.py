@@ -139,8 +139,10 @@ def format_deposits(items: list[Deposit]) -> str:
     return "\n".join(lines)
 
 
-def format_goal(item: FinancialGoal) -> str:
-    current = float(item.current_amount)
+def format_goal(item: FinancialGoal, current_amount: float | None = None) -> str:
+    current = (
+        current_amount if current_amount is not None else float(item.current_amount)
+    )
     target = float(item.target_amount)
     percent = current / target * 100 if target else 0
     filled = min(10, max(0, int(percent // 10)))
@@ -154,6 +156,22 @@ def format_goal(item: FinancialGoal) -> str:
         f"Накоплено: {formatter(current)} из {formatter(target)}\n"
         f"Осталось: {formatter(remaining)} ({remaining_percent:.1f}%)"
     )
+
+
+def format_goals(items: list[FinancialGoal], summary: WealthSummary) -> str:
+    """Render every goal against the user's complete current net worth."""
+    if not items:
+        return "🎯 <b>Финансовые цели</b>\nПока нет целей."
+
+    parts = [
+        "🎯 <b>Финансовые цели</b>",
+        f"Весь капитал: <b>{format_kzt(summary.total_kzt)}</b> · "
+        f"<b>{format_usd(summary.total_usd)}</b>",
+    ]
+    for item in items:
+        current = summary.total_usd if item.currency == "USD" else summary.total_kzt
+        parts.append(format_goal(item, current))
+    return "\n\n".join(parts)
 
 
 def format_capital(summary: WealthSummary) -> str:
