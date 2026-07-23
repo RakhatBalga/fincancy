@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +75,26 @@ async def test_deposit_balance_can_be_updated(
 
     assert updated is not None
     assert float(updated.balance) == pytest.approx(125_000)
+
+
+async def test_deposit_interest_compounds_monthly_and_only_once(
+    session: AsyncSession,
+    user: User,
+) -> None:
+    service = AssetService(session, FakeMarket())  # type: ignore[arg-type]
+    deposit = await service.add_deposit(user.id, "Ата", 500_000, "KZT", 15)
+    deposit.interest_started_on = date(2026, 1, 31)
+    await session.commit()
+
+    accrued = await service.accrue_deposit_interest(date(2026, 3, 31))
+    repeated = await service.accrue_deposit_interest(date(2026, 3, 31))
+
+    assert len(accrued) == 1
+    assert accrued[0].months == 2
+    assert accrued[0].interest == pytest.approx(12_578.13)
+    assert accrued[0].new_balance == pytest.approx(512_578.13)
+    assert repeated == []
+    assert deposit.interest_months_accrued == 2
 
 
 async def test_sales_update_quantity_cash_and_cumulative_pnl(

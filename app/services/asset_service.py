@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,7 @@ from app.db.models import (
     StockSale,
 )
 from app.repositories.asset_repo import AssetRepository
+from app.services import periods
 from app.services.market_data import MarketDataError, YahooFinanceService
 
 
@@ -80,6 +84,26 @@ class SaleResult:
     remaining_quantity: float
 
 
+@dataclass(frozen=True)
+class DepositInterestAccrual:
+    deposit_id: int
+    user_id: int
+    name: str
+    currency: str
+    previous_balance: float
+    interest: float
+    new_balance: float
+    months: int
+
+
+def _add_months(value: date, months: int) -> date:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return date(year, month, day)
+
+
 class AssetService:
     def __init__(
         self, session: AsyncSession, market: YahooFinanceService | None = None
@@ -122,9 +146,66 @@ class AssetService:
             balance,
             normalized_currency,
             annual_rate,
+            periods.today(),
         )
         await self._session.commit()
         return item
+
+    async def accrue_deposit_interest(
+        self,
+        as_of: date,
+    ) -> list[DepositInterestAccrual]:
+        """Compound every fully elapsed monthly period exactly once."""
+        deposits = list(
+            (
+                await self._session.execute(
+                    select(Deposit)
+                    .where(
+                        Deposit.annual_rate.is_not(None),
+                        Deposit.annual_rate > 0,
+                    )
+                    .order_by(Deposit.id.asc())
+                    .with_for_update()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        accrued: list[DepositInterestAccrual] = []
+        for item in deposits:
+            completed = int(item.interest_months_accrued)
+            due_months = 0
+            while _add_months(
+                item.interest_started_on,
+                completed + due_months + 1,
+            ) <= as_of:
+                due_months += 1
+            if due_months == 0:
+                continue
+
+            previous = Decimal(str(item.balance))
+            monthly_rate = Decimal(str(item.annual_rate)) / Decimal("1200")
+            updated = (
+                previous * (Decimal("1") + monthly_rate) ** due_months
+            ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            interest = updated - previous
+            item.balance = updated
+            item.interest_months_accrued = completed + due_months
+            accrued.append(
+                DepositInterestAccrual(
+                    deposit_id=item.id,
+                    user_id=item.user_id,
+                    name=item.name,
+                    currency=item.currency,
+                    previous_balance=float(previous),
+                    interest=float(interest),
+                    new_balance=float(updated),
+                    months=due_months,
+                )
+            )
+
+        await self._session.commit()
+        return accrued
 
     async def add_goal(
         self,

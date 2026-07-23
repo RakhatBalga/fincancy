@@ -59,7 +59,14 @@ def test_goal_formatter_shows_remaining_percent() -> None:
 
 def test_deposits_formatter_combines_items_and_total() -> None:
     items = [
-        Deposit(id=1, user_id=1, name="Депозит 1", balance=64_800, currency="KZT"),
+        Deposit(
+            id=1,
+            user_id=1,
+            name="Депозит 1",
+            balance=64_800,
+            currency="KZT",
+            annual_rate=15,
+        ),
         Deposit(
             id=2,
             user_id=1,
@@ -73,6 +80,7 @@ def test_deposits_formatter_combines_items_and_total() -> None:
 
     assert "Всего: <b>2 314 666 ₸</b>" in text
     assert "Депозит 1</b> — 64 800 ₸" in text
+    assert "15% годовых · ≈ +810 ₸/мес" in text
     assert "Депозит 2</b> — 2 249 866 ₸" in text
 
 

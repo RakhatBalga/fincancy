@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +42,7 @@ class AssetRepository:
         balance: float,
         currency: str,
         annual_rate: float | None,
+        interest_started_on: date,
     ) -> Deposit:
         item = Deposit(
             user_id=user_id,
@@ -47,6 +50,8 @@ class AssetRepository:
             balance=balance,
             currency=currency,
             annual_rate=annual_rate,
+            interest_started_on=interest_started_on,
+            interest_months_accrued=0,
         )
         self._session.add(item)
         await self._session.flush()

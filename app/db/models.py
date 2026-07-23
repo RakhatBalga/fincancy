@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -178,6 +179,12 @@ class Deposit(Base):
     balance: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     annual_rate: Mapped[float | None] = mapped_column(Numeric(7, 3), nullable=True)
+    interest_started_on: Mapped[date] = mapped_column(
+        Date, server_default=func.current_date(), nullable=False
+    )
+    interest_months_accrued: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
@@ -12,6 +12,10 @@ _TZ = ZoneInfo(settings.tz)
 
 def _now() -> datetime:
     return datetime.now(tz=_TZ)
+
+
+def today() -> date:
+    return _now().date()
 
 
 def today_range() -> tuple[datetime, datetime]:

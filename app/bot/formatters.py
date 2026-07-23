@@ -198,7 +198,16 @@ def format_deposit(item: Deposit, usd_kzt: float | None = None) -> str:
             f"Эквивалент: {format_kzt(converted) if item.currency == 'USD' else format_usd(converted)}"
         )
     if item.annual_rate is not None:
-        lines.append(f"Ставка: {float(item.annual_rate):g}% годовых")
+        monthly_interest = balance * float(item.annual_rate) / 1200
+        monthly_amount = (
+            format_usd(monthly_interest)
+            if item.currency == "USD"
+            else format_kzt(monthly_interest)
+        )
+        lines.append(
+            f"Ставка: {float(item.annual_rate):g}% годовых · "
+            f"≈ +{monthly_amount}/мес с капитализацией"
+        )
     return "\n".join(lines)
 
 
@@ -219,11 +228,18 @@ def format_deposits(items: list[Deposit]) -> str:
     for item in items:
         balance = float(item.balance)
         amount = format_usd(balance) if item.currency == "USD" else format_kzt(balance)
-        rate = (
-            f" · {float(item.annual_rate):g}% годовых"
-            if item.annual_rate is not None
-            else ""
-        )
+        rate = ""
+        if item.annual_rate is not None:
+            monthly_interest = balance * float(item.annual_rate) / 1200
+            monthly_amount = (
+                format_usd(monthly_interest)
+                if item.currency == "USD"
+                else format_kzt(monthly_interest)
+            )
+            rate = (
+                f" · {float(item.annual_rate):g}% годовых"
+                f" · ≈ +{monthly_amount}/мес"
+            )
         lines.append(f"• <b>{escape(item.name)}</b> — {amount}{rate}")
     return "\n".join(lines)
 

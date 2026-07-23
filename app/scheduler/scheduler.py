@@ -7,7 +7,12 @@ from apscheduler.triggers.cron import CronTrigger
 from aiogram import Bot
 
 from app.core.config import settings
-from app.scheduler.jobs import check_budgets, daily_reminder, weekly_digest
+from app.scheduler.jobs import (
+    check_budgets,
+    compound_deposit_interest,
+    daily_reminder,
+    weekly_digest,
+)
 
 
 def create_scheduler(bot: Bot) -> AsyncIOScheduler:
@@ -18,6 +23,12 @@ def create_scheduler(bot: Bot) -> AsyncIOScheduler:
     """
     scheduler = AsyncIOScheduler(timezone=settings.tz)
 
+    scheduler.add_job(
+        compound_deposit_interest,
+        trigger=CronTrigger(hour=0, minute=10),
+        id="compound_deposit_interest",
+        replace_existing=True,
+    )
     scheduler.add_job(
         check_budgets,
         trigger=CronTrigger(hour=20, minute=0),

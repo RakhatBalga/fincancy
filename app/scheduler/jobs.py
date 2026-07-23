@@ -12,7 +12,9 @@ from app.bot.formatters import format_budget_alert, format_weekly_digest
 from app.db.base import async_session_factory
 from app.repositories.user_repo import UserRepository
 from app.services.analytics_service import AnalyticsService
+from app.services.asset_service import AssetService
 from app.services.budget_service import BudgetService
+from app.services import periods
 
 log = structlog.get_logger(__name__)
 
@@ -20,6 +22,19 @@ _REMINDER_TEXT = (
     "🌙 Бүгінгі шығындарды жазуды ұмытпа — жай жаз, мысалы "
     "<i>кешкі ас 3500</i>."
 )
+
+
+async def compound_deposit_interest() -> None:
+    """Accrue due monthly interest for all rate-bearing deposits."""
+    async with async_session_factory() as session:
+        accrued = await AssetService(session).accrue_deposit_interest(
+            periods.today()
+        )
+    log.info(
+        "deposit_interest_compounded",
+        deposits=len(accrued),
+        months=sum(item.months for item in accrued),
+    )
 
 
 async def check_budgets(bot: Bot) -> None:
