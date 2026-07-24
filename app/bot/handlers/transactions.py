@@ -17,6 +17,12 @@ from app.bot.keyboards import (
 )
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.transaction_repo import TransactionRepository
+from app.services.deposit_payment_service import (
+    DepositPaymentError,
+    DepositPaymentService,
+    looks_like_deposit_payment,
+    parse_deposit_payment,
+)
 from app.services.parser_service import ExpenseParseError, ParserService
 from app.services.transaction_service import TransactionService
 from app.services.user_service import UserService
@@ -52,6 +58,30 @@ async def handle_free_text(
     user = await UserService(session).get(message.from_user.id)
     if user is None:
         await message.answer("Алдымен /start басыңыз.")
+        return
+
+    if looks_like_deposit_payment(message.text):
+        draft = parse_deposit_payment(message.text)
+        if draft is None:
+            await message.answer(
+                "Не понял составную операцию. Напишите, например: "
+                "<i>вывел 53к из Депозита 1 и оплатил рассрочку Kaspi</i>."
+            )
+            return
+        try:
+            result = await DepositPaymentService(session).apply(user.id, draft)
+        except DepositPaymentError as exc:
+            await message.answer(str(exc))
+            return
+        amount = f"{draft.amount:,.0f}".replace(",", " ")
+        previous = f"{result.previous_balance:,.0f}".replace(",", " ")
+        current = f"{float(result.deposit.balance):,.0f}".replace(",", " ")
+        await message.answer(
+            "✅ <b>Перевод и платёж сохранены</b>\n"
+            f"{result.deposit.name}: {previous} → {current} ₸\n"
+            f"{draft.payment_label.capitalize()}: {amount} ₸\n"
+            "Доход не создавался."
+        )
         return
 
     # Natural-language "undo": delete the most recent transaction.
