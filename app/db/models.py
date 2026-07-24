@@ -67,6 +67,9 @@ class User(Base):
     salary_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_weekend_rule: Mapped[str | None] = mapped_column(String(32), nullable=True)
     stipend_timing: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    financial_cycle_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     installment_balance_primary: Mapped[float | None] = mapped_column(
         Numeric(18, 2), nullable=True
     )

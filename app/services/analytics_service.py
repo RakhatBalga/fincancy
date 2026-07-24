@@ -67,19 +67,19 @@ class AnalyticsService:
         return await self.period_report(user, "Осы апта", start, end)
 
     async def month(self, user: User) -> PeriodReport:
-        start, end = periods.month_range()
-        return await self.period_report(user, "Осы ай", start, end)
+        start, end = periods.financial_cycle_range(user)
+        return await self.period_report(user, "Осы қаржы циклі", start, end)
 
     async def income_month(self, user: User) -> PeriodReport:
         """Income (not expenses) broken down by category for this month."""
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         return await self.period_report(
-            user, "Айлық кірістер", start, end, TransactionType.income
+            user, "Қаржы циклінің кірістері", start, end, TransactionType.income
         )
 
     async def month_balance(self, user: User) -> tuple[PeriodReport, float]:
         """Return ``(income_report, expense_total)`` for the current month."""
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         income = await self.income_month(user)
         expense_total = await self._transactions.total_amount(
             user.id, TransactionType.expense, start, end
@@ -96,7 +96,7 @@ class AnalyticsService:
 
     async def month_shares(self, user: User) -> dict[str, float]:
         """Current-month expense share (%) per category name."""
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         rows = await self._transactions.total_by_category(
             user.id, TransactionType.expense, start, end
         )
@@ -107,7 +107,7 @@ class AnalyticsService:
 
     async def group_totals(self, user: User) -> dict[str, float]:
         """Current-month expense totals by 50/30/20 bucket."""
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         return await self._transactions.total_by_group(
             user.id, TransactionType.expense, start, end
         )

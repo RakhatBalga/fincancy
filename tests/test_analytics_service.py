@@ -86,6 +86,20 @@ async def test_period_report_empty(session: AsyncSession, user: User) -> None:
     assert report.rows == []
 
 
+async def test_month_report_uses_financial_cycle_start(
+    session: AsyncSession, user: User
+) -> None:
+    now = datetime.now(timezone.utc)
+    user.financial_cycle_started_at = now - timedelta(days=1)
+    await session.commit()
+    await _add_tx(session, user, "азық-түлік", 9000.0, now - timedelta(days=2))
+    await _add_tx(session, user, "азық-түлік", 2600.0, now)
+
+    report = await AnalyticsService(session).month(user)
+
+    assert report.total == 2600.0
+
+
 async def test_weekly_digest_change_percent(
     session: AsyncSession, user: User
 ) -> None:

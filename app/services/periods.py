@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from app.core.config import settings
+from app.db.models import User
 
 _TZ = ZoneInfo(settings.tz)
 
@@ -16,6 +17,11 @@ def _now() -> datetime:
 
 def today() -> date:
     return _now().date()
+
+
+def now() -> datetime:
+    """Current application time with timezone information."""
+    return _now()
 
 
 def today_range() -> tuple[datetime, datetime]:
@@ -49,6 +55,16 @@ def month_range() -> tuple[datetime, datetime]:
     else:
         end = start.replace(month=start.month + 1)
     return start, end
+
+
+def financial_cycle_range(user: User) -> tuple[datetime, datetime]:
+    """Current salary-based cycle, falling back to the calendar month."""
+    if user.financial_cycle_started_at is None:
+        return month_range()
+    start = user.financial_cycle_started_at
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=_TZ)
+    return start.astimezone(_TZ), _now() + timedelta(days=1)
 
 
 def current_month_key() -> str:

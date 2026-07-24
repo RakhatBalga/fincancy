@@ -49,6 +49,21 @@ async def test_add_from_parsed_creates_custom_category(
     assert tx.category_id == category.id
 
 
+async def test_official_income_starts_financial_cycle(
+    session: AsyncSession, user: User
+) -> None:
+    parsed = ParsedTransaction(
+        amount=121_000,
+        category="жалақы",
+        type=TransactionType.income,
+        description="зарплата",
+    )
+
+    await TransactionService(session).add_from_parsed(user.id, parsed)
+
+    assert user.financial_cycle_started_at is not None
+
+
 async def test_change_category_reassigns(
     session: AsyncSession, user: User
 ) -> None:

@@ -291,7 +291,7 @@ class AdvisorService:
         rule updates itself as salary/stipend land — no monthly re-entry needed.
         Returns ``None`` if there is neither logged income nor a baseline.
         """
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         actual_income = await self._transactions.total_amount(
             user.id, TransactionType.income, start, end
         )
@@ -351,7 +351,7 @@ class AdvisorService:
         self, user: User, asset_summary: str | None = None
     ) -> str | None:
         """Assemble a compact plain-text summary fed to the model."""
-        start, end = periods.month_range()
+        start, end = periods.financial_cycle_range(user)
         rows = await self._transactions.total_by_category(
             user.id, TransactionType.expense, start, end
         )

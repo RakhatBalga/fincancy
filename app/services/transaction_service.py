@@ -5,13 +5,17 @@ from __future__ import annotations
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Transaction, TransactionType
+from app.db.models import Transaction, TransactionType, User
 from app.repositories.budget_repo import BudgetRepository
 from app.repositories.category_repo import CategoryRepository
 from app.repositories.transaction_repo import TransactionRepository
+from app.services import periods
 from app.services.schemas import ParsedTransaction
 
 log = structlog.get_logger(__name__)
+
+_CYCLE_START_INCOME_CATEGORIES = {"жалақы", "зарплата", "стипендия"}
+_MIN_CYCLE_DAYS = 20
 
 
 class TransactionService:
@@ -39,6 +43,16 @@ class TransactionService:
             tx_type=parsed.type,
             description=parsed.description,
         )
+        if (
+            parsed.type is TransactionType.income
+            and category.name.casefold() in _CYCLE_START_INCOME_CATEGORIES
+        ):
+            user = await self._session.get(User, user_id)
+            if user is not None:
+                current = periods.now()
+                previous = user.financial_cycle_started_at
+                if previous is None or (current - previous).days >= _MIN_CYCLE_DAYS:
+                    user.financial_cycle_started_at = current
         await self._session.commit()
         log.info(
             "transaction_saved",
