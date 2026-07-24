@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from enum import Enum
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +53,21 @@ class RuleBreakdown:
     # split 30:20 between wants and savings — the "gramotno" plan.
     wants_ideal: float
     savings_ideal: float
+
+
+class AdvicePeriod(str, Enum):
+    today = "today"
+    week = "week"
+    month = "month"
+    overall = "overall"
+
+
+_PERIOD_LABELS = {
+    AdvicePeriod.today: "сегодня",
+    AdvicePeriod.week: "за текущую неделю",
+    AdvicePeriod.month: "за текущий финансовый месяц",
+    AdvicePeriod.overall: "за всё время",
+}
 
 
 _ADVICE_SYSTEM = """
@@ -179,6 +195,40 @@ _COMPACT_ADVICE_SYSTEM = """
 - Используй только Telegram HTML <b>, без markdown.
 """.strip()
 
+_SCOPED_ADVICE_SYSTEM = """
+Ты — спокойный и честный финансовый советник пользователя из Казахстана.
+На входе указаны точный период, доходы, расходы и категории. Для месячного
+или общего разбора также могут быть даны профиль, рассрочки, депозиты,
+портфель, капитал и финансовые цели.
+
+Ответь ПО-РУССКИ, без воды, используя Telegram HTML <b>, в таком формате:
+
+<b>Общая картина</b>
+2-3 предложения с главными цифрами и честной оценкой именно выбранного периода.
+
+<b>Движение денег</b>
+2-4 коротких пункта про доходы, обязательные расходы, необязательные расходы,
+пополнения депозитов и остаток. Пополнение собственного депозита — накопление,
+а не потребление и не новый доход.
+
+<b>Оценка</b>
+2-4 коротких пункта о сильных сторонах, рисках и соответствии целям. Для дня
+и недели не делай выводов о долгосрочной устойчивости по слишком короткому
+периоду. Для общего анализа учитывай капитал, портфель, цели и рассрочки.
+
+<b>Следующий шаг</b>
+Одно или два конкретных действия с суммой либо измеримым результатом.
+
+Правила:
+- Опирайся только на цифры из сводки и явно называй анализируемый период.
+- Не выдумывай доходы, расходы, возраст, ставки или обязательства.
+- Если данных за период мало, скажи это прямо, но всё равно оцени имеющиеся.
+- Рассрочки не называй кредитами и не приписывай им проценты.
+- Не давай категоричных команд покупать или продавать отдельные акции.
+- Для дня ответ должен быть около 700-1100 символов, для недели 900-1400,
+  для месяца и общего анализа 1500-2300, всегда короче 2500 символов.
+""".strip()
+
 
 # Telegram's HTML parser only understands a small tag set (b, i, u, s, a,
 # code, pre, span, blockquote) — anything else (p, ul, li, div, br, h1, ...)
@@ -274,6 +324,89 @@ def build_asset_advice_summary(
     return "\n".join(lines)
 
 
+def _financial_profile_context(user: User) -> list[str]:
+    """Long-term profile context used only for month and overall advice."""
+    lines = [
+        f"Возраст: {user.age if user.age is not None else 'не указан'}.",
+        "Финансовый риск: "
+        f"{user.risk_tolerance if user.risk_tolerance else 'не указан'}.",
+    ]
+    if user.obligation_type:
+        lines.append(f"Тип текущих обязательств: {user.obligation_type}.")
+
+    official_salary = float(user.official_salary_monthly or 0)
+    official_stipend = float(user.official_stipend_monthly or 0)
+    official_income = official_salary + official_stipend
+    if official_income:
+        lines.extend(
+            [
+                f"Официальный доход для ипотеки: {official_income:.0f} ₸/мес "
+                f"({official_salary:.0f} ₸ зарплата + "
+                f"{official_stipend:.0f} ₸ стипендия).",
+                "Остальные поступления — помощь родителей/неофициальные; "
+                "не учитывать их в ипотечной платёжеспособности.",
+            ]
+        )
+    if user.mortgage_payment_limit_percent is not None and official_income:
+        limit_percent = float(user.mortgage_payment_limit_percent)
+        lines.append(
+            f"Личный предел ипотечного платежа: {limit_percent:g}% "
+            f"официального дохода = "
+            f"{official_income * limit_percent / 100:.0f} ₸/мес."
+        )
+    if user.salary_day:
+        timing = f"Зарплата обычно {user.salary_day}-го числа"
+        if user.salary_weekend_rule == "next_monday":
+            timing += ", если это выходной — в следующий понедельник"
+        lines.append(timing + ".")
+    if user.stipend_timing:
+        lines.append(f"Стипендия: {user.stipend_timing}.")
+
+    installment_total = float(user.installment_balance_primary or 0) + float(
+        user.installment_balance_secondary or 0
+    )
+    if installment_total:
+        components = (
+            f"{float(user.installment_balance_primary or 0):.0f} + "
+            f"{float(user.installment_balance_secondary or 0):.0f} ₸"
+        )
+        end = (
+            user.installment_end_date.strftime("%m.%Y")
+            if user.installment_end_date
+            else "дата не указана"
+        )
+        lines.append(
+            f"Рассрочки: остаток {installment_total:.0f} ₸ "
+            f"({components}), завершатся {end}."
+        )
+        kaspi_schedule = installment_schedule_summary(user, combined=False)
+        combined_schedule = installment_schedule_summary(user, combined=True)
+        if kaspi_schedule:
+            lines.append(f"График Kaspi: {kaspi_schedule}.")
+        if combined_schedule:
+            lines.append(
+                "Общая нагрузка Kaspi + Halyk по месяцам: "
+                f"{combined_schedule}."
+            )
+    elif user.debt_balance is not None:
+        debt_line = f"Остаток долгов: {float(user.debt_balance):.0f} ₸"
+        if user.debt_annual_rate is not None:
+            debt_line += (
+                f", максимальная ставка {float(user.debt_annual_rate):g}% годовых"
+            )
+        lines.append(debt_line + ".")
+
+    if user.housing_is_free is True:
+        lines.append("Жильё: бесплатно (живёт с семьёй/родителями).")
+    elif user.housing_is_free is False:
+        lines.append("Жильё: платит сам(а).")
+    if user.food_is_free is True:
+        lines.append("Питание: в основном бесплатно (дома).")
+    elif user.food_is_free is False:
+        lines.append("Питание: платит сам(а).")
+    return lines
+
+
 class AdvisorService:
     """Builds the 50/30/20 breakdown and the monthly AI advice."""
 
@@ -336,143 +469,86 @@ class AdvisorService:
         )
 
     async def monthly_advice(self, user: User, asset_summary: str | None = None) -> str:
-        """Generate a compact review of cash flow, assets, and goals."""
-        summary = await self._build_summary(user, asset_summary)
-        if summary is None:
-            return "Ай бойы дерек аз — бірнеше шығын жаз, сонда кеңес беремін."
+        """Backward-compatible financial-cycle advice entry point."""
+        return await self.period_advice(user, AdvicePeriod.month, asset_summary)
 
-        advice = await gemini.generate_text(summary, _COMPACT_ADVICE_SYSTEM)
-        log.info("monthly_advice_generated", user_id=user.id)
+    async def period_advice(
+        self,
+        user: User,
+        period: AdvicePeriod,
+        asset_summary: str | None = None,
+    ) -> str:
+        """Generate advice scoped to today, week, financial month, or all time."""
+        summary = await self._build_summary(user, asset_summary, period=period)
+        if summary is None:
+            return (
+                f"За период «{_PERIOD_LABELS[period]}» пока нет финансовых "
+                "операций для анализа."
+            )
+
+        advice = await gemini.generate_text(summary, _SCOPED_ADVICE_SYSTEM)
+        log.info(
+            "period_advice_generated",
+            user_id=user.id,
+            period=period.value,
+        )
         if not advice:
             return "Кеңес құрастыра алмадым, кейінірек көр."
         return _clean_markup(advice)
 
     async def _build_summary(
-        self, user: User, asset_summary: str | None = None
+        self,
+        user: User,
+        asset_summary: str | None = None,
+        *,
+        period: AdvicePeriod = AdvicePeriod.month,
     ) -> str | None:
         """Assemble a compact plain-text summary fed to the model."""
-        start, end = periods.financial_cycle_range(user)
+        if period is AdvicePeriod.today:
+            start, end = periods.today_range()
+        elif period is AdvicePeriod.week:
+            start, end = periods.week_range()
+        elif period is AdvicePeriod.overall:
+            start, end = periods.all_time_range()
+        else:
+            start, end = periods.financial_cycle_range(user)
         rows = await self._transactions.total_by_category(
             user.id, TransactionType.expense, start, end
         )
-        if not rows and not asset_summary:
+        income_rows = await self._transactions.total_by_category(
+            user.id, TransactionType.income, start, end
+        )
+        if not rows and not income_rows and not asset_summary:
             return None
 
         total = sum(a for _, a in rows)
 
-        # Living situation — tells the hypothetical-budget section whether to
-        # invent rent/food money the user doesn't actually spend.
-        living_lines: list[str] = [
-            f"Возраст: {user.age if user.age is not None else 'не указан'}.",
-            "Финансовый риск: "
-            f"{user.risk_tolerance if user.risk_tolerance else 'не указан'}.",
-        ]
-        if user.obligation_type:
-            living_lines.append(f"Тип текущих обязательств: {user.obligation_type}.")
-        official_salary = float(user.official_salary_monthly or 0)
-        official_stipend = float(user.official_stipend_monthly or 0)
-        official_income = official_salary + official_stipend
-        if official_income:
-            living_lines.append(
-                f"Официальный доход для ипотеки: {official_income:.0f} ₸/мес "
-                f"({official_salary:.0f} ₸ зарплата + "
-                f"{official_stipend:.0f} ₸ стипендия)."
-            )
-            living_lines.append(
-                "Остальные поступления — помощь родителей/неофициальные; "
-                "не учитывать их в ипотечной платёжеспособности."
-            )
-        if user.mortgage_payment_limit_percent is not None and official_income:
-            limit_percent = float(user.mortgage_payment_limit_percent)
-            living_lines.append(
-                f"Личный предел ипотечного платежа: {limit_percent:g}% "
-                f"официального дохода = "
-                f"{official_income * limit_percent / 100:.0f} ₸/мес."
-            )
-        if user.salary_day:
-            timing = f"Зарплата обычно {user.salary_day}-го числа"
-            if user.salary_weekend_rule == "next_monday":
-                timing += ", если это выходной — в следующий понедельник"
-            living_lines.append(timing + ".")
-        if user.stipend_timing:
-            living_lines.append(f"Стипендия: {user.stipend_timing}.")
+        living_lines = [f"Анализируемый период: {_PERIOD_LABELS[period]}."]
+        if period in {AdvicePeriod.month, AdvicePeriod.overall}:
+            living_lines.extend(_financial_profile_context(user))
 
-        installment_total = float(user.installment_balance_primary or 0) + float(
-            user.installment_balance_secondary or 0
-        )
-        if installment_total:
-            components = (
-                f"{float(user.installment_balance_primary or 0):.0f} + "
-                f"{float(user.installment_balance_secondary or 0):.0f} ₸"
-            )
-            end = (
-                user.installment_end_date.strftime("%m.%Y")
-                if user.installment_end_date
-                else "дата не указана"
-            )
-            living_lines.append(
-                f"Рассрочки: остаток {installment_total:.0f} ₸ "
-                f"({components}), завершатся {end}."
-            )
-            kaspi_schedule = installment_schedule_summary(user, combined=False)
-            combined_schedule = installment_schedule_summary(user, combined=True)
-            if kaspi_schedule:
-                living_lines.append(f"График Kaspi: {kaspi_schedule}.")
-            if combined_schedule:
-                living_lines.append(
-                    "Общая нагрузка Kaspi + Halyk по месяцам: "
-                    f"{combined_schedule}."
-                )
-            if user.installment_kaspi_end_date:
-                living_lines.append(
-                    "Платёж Kaspi постепенно снижается и завершится "
-                    f"{user.installment_kaspi_end_date.strftime('%m.%Y')}."
-                )
-            if user.installment_halyk_end_date:
-                living_lines.append(
-                    f"Рассрочка Halyk {float(user.installment_halyk_monthly_payment or 0):.0f} "
-                    "₸/мес завершится "
-                    f"{user.installment_halyk_end_date.strftime('%m.%Y')}."
-                )
-        elif user.debt_balance is not None:
-            debt_line = f"Остаток долгов: {float(user.debt_balance):.0f} ₸"
-            if user.debt_annual_rate is not None:
-                debt_line += (
-                    f", максимальная ставка {float(user.debt_annual_rate):g}% годовых"
-                )
-            living_lines.append(debt_line + ".")
-        elif user.obligation_type != "рассрочки":
-            living_lines.append(
-                "Остаток долгов и ставки не указаны: нельзя делать вывод "
-                "о размере долга или выгоде досрочного погашения."
-            )
-        if user.housing_is_free is True:
-            living_lines.append("Жильё: бесплатно (живёт с семьёй/родителями).")
-        elif user.housing_is_free is False:
-            living_lines.append("Жильё: платит сам(а).")
-        if user.food_is_free is True:
-            living_lines.append("Питание: в основном бесплатно (дома).")
-        elif user.food_is_free is False:
-            living_lines.append("Питание: платит сам(а).")
-
-        # Income sources + balance for the month.
-        income_report, expense_total = await self._analytics.month_balance(user)
+        # Income sources + balance for the selected period.
+        income_total = sum(amount for _, amount in income_rows)
+        expense_total = total
         lines: list[str] = list(living_lines)
-        if income_report.rows:
-            lines.append("Доходы за месяц по источникам:")
-            for r in income_report.rows:
-                lines.append(f"- {r.name}: {r.total:.0f} ₸")
-            lines.append(f"Всего доходов: {income_report.total:.0f} ₸.")
-        balance = income_report.total - expense_total
+        if income_rows:
+            lines.append("Доходы за выбранный период по источникам:")
+            for name, amount in income_rows:
+                lines.append(f"- {name}: {amount:.0f} ₸")
+            lines.append(f"Всего доходов: {income_total:.0f} ₸.")
+        balance = income_total - expense_total
         lines.append(
-            f"Баланс за месяц: {balance:.0f} ₸ "
+            f"Баланс за выбранный период: {balance:.0f} ₸ "
             f"({'профицит' if balance >= 0 else 'дефицит'})."
         )
 
         category_groups = {
             c.name: c.group_type for c in await self._categories.list_for_user(user.id)
         }
-        lines += [f"Расходы за месяц: {total:.0f} ₸.", "Категории расходов:"]
+        lines += [
+            f"Расходы за выбранный период: {total:.0f} ₸.",
+            "Категории расходов:",
+        ]
         for name, amount in rows:
             share = amount / total * 100.0 if total else 0.0
             group = category_groups.get(name)
@@ -485,7 +561,11 @@ class AdvisorService:
             )
             lines.append(f"- {name}: {amount:.0f} ₸ ({share:.0f}%){tag}")
 
-        rule = await self.fifty_thirty_twenty(user)
+        rule = (
+            await self.fifty_thirty_twenty(user)
+            if period is AdvicePeriod.month
+            else None
+        )
         if rule is not None:
             lines.append(
                 f"Доход: {rule.income:.0f} ₸. "
@@ -503,32 +583,35 @@ class AdvisorService:
                 f"отложилось фактически {rule.savings:.0f} ₸."
             )
 
-        anomalies = await self._analytics.detect_anomalies(user)
-        if anomalies:
-            joined = ", ".join(
-                f"{a['category']} +{(a['ratio'] - 1) * 100:.0f}%"  # type: ignore[operator]
-                for a in anomalies[:3]
-            )
-            lines.append(f"Резкий рост vs обычного: {joined}.")
+        if period is AdvicePeriod.month:
+            anomalies = await self._analytics.detect_anomalies(user)
+            if anomalies:
+                joined = ", ".join(
+                    f"{a['category']} +{(a['ratio'] - 1) * 100:.0f}%"
+                    for a in anomalies[:3]
+                )
+                lines.append(f"Резкий рост vs обычного: {joined}.")
 
-        subs = await self._analytics.detect_subscriptions(user)
-        if subs:
-            sub_total = sum(float(s["amount"]) for s in subs)  # type: ignore[arg-type]
-            names = ", ".join(str(s["description"]) for s in subs[:5])
-            lines.append(
-                f"Похоже на подписки/регулярные платежи на ~{sub_total:.0f} ₸/мес "
-                f"({names})."
-            )
+            subs = await self._analytics.detect_subscriptions(user)
+            if subs:
+                sub_total = sum(float(s["amount"]) for s in subs)
+                names = ", ".join(str(s["description"]) for s in subs[:5])
+                lines.append(
+                    "Похоже на подписки/регулярные платежи на "
+                    f"~{sub_total:.0f} ₸/мес ({names})."
+                )
 
-        # Deviations from the KZ average (shares of spending).
-        bench = await self.benchmark(user)
-        deviations = [
-            f"{name}: {u:.0f}% vs средних {kz:.0f}%"
-            for name, u, kz in bench
-            if abs(u - kz) >= 7
-        ][:3]
-        if deviations:
-            lines.append("Отклонения от среднего по РК: " + "; ".join(deviations) + ".")
+            # Deviations from the KZ average (shares of spending).
+            bench = await self.benchmark(user)
+            deviations = [
+                f"{name}: {u:.0f}% vs средних {kz:.0f}%"
+                for name, u, kz in bench
+                if abs(u - kz) >= 7
+            ][:3]
+            if deviations:
+                lines.append(
+                    "Отклонения от среднего по РК: " + "; ".join(deviations) + "."
+                )
 
         if asset_summary:
             lines.extend(["", asset_summary])

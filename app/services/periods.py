@@ -67,6 +67,11 @@ def financial_cycle_range(user: User) -> tuple[datetime, datetime]:
     return start.astimezone(_TZ), _now() + timedelta(days=1)
 
 
+def all_time_range() -> tuple[datetime, datetime]:
+    """Wide range covering all stored user transactions."""
+    return datetime(2000, 1, 1, tzinfo=_TZ), _now() + timedelta(days=1)
+
+
 def current_month_key() -> str:
     """``"YYYY-MM"`` key for the current month (used by budgets)."""
     return _now().strftime("%Y-%m")

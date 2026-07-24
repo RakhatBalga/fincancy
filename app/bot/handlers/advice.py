@@ -9,7 +9,7 @@ import structlog
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.formatters import (
@@ -17,9 +17,18 @@ from app.bot.formatters import (
     format_benchmark,
     format_rule,
 )
-from app.bot.keyboards import AI_BUTTONS
+from app.bot.keyboards import (
+    ADVICE_PERIOD_PREFIX,
+    ADVICE_PERIODS,
+    AI_BUTTONS,
+    advice_period_keyboard,
+)
 from app.db.models import User
-from app.services.advisor_service import AdvisorService, build_asset_advice_summary
+from app.services.advisor_service import (
+    AdvicePeriod,
+    AdvisorService,
+    build_asset_advice_summary,
+)
 from app.services.analytics_service import AnalyticsService
 from app.services.asset_service import AssetService
 from app.services.installment_schedule import installment_schedule_summary
@@ -231,15 +240,84 @@ async def cmd_benchmark(message: Message, session: AsyncSession) -> None:
     await message.answer(format_benchmark(rows))
 
 
-@router.message(Command("advice"))
 @router.message(F.text.in_(AI_BUTTONS))
+async def show_advice_menu(message: Message) -> None:
+    await message.answer(
+        "За какой период дать финансовое мнение?",
+        reply_markup=advice_period_keyboard(),
+    )
+
+
+@router.message(Command("advice"))
 async def cmd_advice(
     message: Message,
+    command: CommandObject,
     session: AsyncSession,
     market: YahooFinanceService,
 ) -> None:
-    user = await _require_user(message, session)
+    raw_period = (command.args or "").strip().casefold()
+    aliases = {
+        "today": AdvicePeriod.today,
+        "сегодня": AdvicePeriod.today,
+        "week": AdvicePeriod.week,
+        "неделя": AdvicePeriod.week,
+        "month": AdvicePeriod.month,
+        "месяц": AdvicePeriod.month,
+        "overall": AdvicePeriod.overall,
+        "в целом": AdvicePeriod.overall,
+    }
+    if not raw_period:
+        await show_advice_menu(message)
+        return
+    period = aliases.get(raw_period)
+    if period is None:
+        await message.answer(
+            "Период не распознан. Используйте: "
+            "<code>/advice today</code>, <code>week</code>, "
+            "<code>month</code> или <code>overall</code>."
+        )
+        return
+    await _run_advice(message, session, market, period)
+
+
+@router.callback_query(F.data.startswith(f"{ADVICE_PERIOD_PREFIX}:"))
+async def choose_advice_period(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    market: YahooFinanceService,
+) -> None:
+    assert callback.data is not None
+    raw_period = callback.data.split(":", 1)[1]
+    if raw_period not in ADVICE_PERIODS:
+        await callback.answer("Неизвестный период.", show_alert=True)
+        return
+    await callback.answer()
+    if isinstance(callback.message, Message):
+        await _run_advice(
+            callback.message,
+            session,
+            market,
+            AdvicePeriod(raw_period),
+            telegram_id=callback.from_user.id,
+        )
+
+
+async def _run_advice(
+    message: Message,
+    session: AsyncSession,
+    market: YahooFinanceService,
+    period: AdvicePeriod,
+    *,
+    telegram_id: int | None = None,
+) -> None:
+    user = (
+        await _require_user(message, session)
+        if telegram_id is None
+        else await UserService(session).get(telegram_id)
+    )
     if user is None:
+        if telegram_id is not None:
+            await message.answer("Алдымен /start басыңыз.")
         return
 
     if message.bot is not None:
@@ -247,18 +325,23 @@ async def cmd_advice(
 
     advisor = AdvisorService(session)
     asset_context = None
-    try:
-        asset_service = AssetService(session, market)
-        wealth = await asset_service.wealth(user.id)
-        goals = await asset_service.goals(user.id)
-        asset_context = build_asset_advice_summary(wealth, goals)
-    except MarketDataError:
-        log.warning("asset_quotes_unavailable_for_advice", user_id=user.id)
+    if period in {AdvicePeriod.month, AdvicePeriod.overall}:
+        try:
+            asset_service = AssetService(session, market)
+            wealth = await asset_service.wealth(user.id)
+            goals = await asset_service.goals(user.id)
+            asset_context = build_asset_advice_summary(wealth, goals)
+        except MarketDataError:
+            log.warning("asset_quotes_unavailable_for_advice", user_id=user.id)
 
     try:
-        advice = await advisor.monthly_advice(user, asset_context)
+        advice = await advisor.period_advice(user, period, asset_context)
     except Exception:  # noqa: BLE001 - keep the bot responsive on AI failures
-        log.exception("compact_advice_failed", user_id=user.id)
+        log.exception(
+            "period_advice_failed",
+            user_id=user.id,
+            period=period.value,
+        )
         await message.answer("Не удалось получить мнение ИИ. Попробуйте чуть позже.")
         return
     await _safe_send(message, format_advice(advice))

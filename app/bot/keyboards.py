@@ -43,6 +43,14 @@ DEPOSIT_BUTTONS: frozenset[str] = frozenset({BTN_DEPOSITS})
 FIN_GOAL_BUTTONS: frozenset[str] = frozenset({BTN_FIN_GOALS})
 CAPITAL_BUTTONS: frozenset[str] = frozenset({BTN_CAPITAL})
 
+ADVICE_PERIOD_PREFIX = "advice"
+ADVICE_PERIODS = {
+    "today": "Сегодня",
+    "week": "Неделя",
+    "month": "Месяц",
+    "overall": "В целом",
+}
+
 # All reply-keyboard labels — FSM "waiting for a number" states exclude these so
 # a button press is never mistaken for the typed amount.
 MENU_BUTTONS: frozenset[str] = (
@@ -121,6 +129,18 @@ def main_reply_keyboard() -> ReplyKeyboardMarkup:
         resize_keyboard=True,
         input_field_placeholder="Шығын жаз, мыс. «кофе 800»",
     )
+
+
+def advice_period_keyboard() -> InlineKeyboardMarkup:
+    """Period selector shown after tapping the AI opinion button."""
+    builder = InlineKeyboardBuilder()
+    for key, label in ADVICE_PERIODS.items():
+        builder.button(
+            text=label,
+            callback_data=f"{ADVICE_PERIOD_PREFIX}:{key}",
+        )
+    builder.adjust(2)
+    return builder.as_markup()
 
 
 # Callback data format: "confirm:<transaction_id>" / "recat:<transaction_id>"
